@@ -302,6 +302,12 @@ class MainWindow(QMainWindow):
 
         self.mem_plot = HistoryPlot("메모리 사용량", COLORS["blue"], 100, "%")
 
+        self.cpu_freq_plot = HistoryPlot("CPU 클럭", COLORS["green"], 6.0, "GHz", dynamic_y=True)
+        self.cpu_freq_combo = QComboBox()
+        self.cpu_freq_combo.addItem("전체 평균", "avg")
+        self.cpu_freq_combo.addItem("모든 CPU", "all")
+        self.cpu_freq_plot.layout.insertWidget(1, self.cpu_freq_combo)
+
         self.cpu_temp_plot = HistoryPlot("CPU 온도", COLORS["red"], 95, "°C", dynamic_y=True)
         self.cpu_temp_combo = QComboBox()
         self.cpu_temp_combo.addItem("전체 평균", "avg")
@@ -316,13 +322,14 @@ class MainWindow(QMainWindow):
 
         self.storage_card = StorageCard()
 
-        # 한 화면 대시보드: CPU만 전체 폭, 나머지는 2열로 압축한다.
-        grid.addWidget(self.cpu_plot, 0, 0, 1, 2)
-        grid.addWidget(self.mem_plot, 1, 0)
-        grid.addWidget(self.cpu_temp_plot, 1, 1)
+        # 한 화면 대시보드: 3행 2열로 주요 지표를 균등 배치한다.
+        grid.addWidget(self.cpu_plot, 0, 0)
+        grid.addWidget(self.cpu_freq_plot, 0, 1)
+        grid.addWidget(self.cpu_temp_plot, 1, 0)
+        grid.addWidget(self.mem_plot, 1, 1)
         grid.addWidget(self.nvme_temp_plot, 2, 0)
         grid.addWidget(self.storage_card, 2, 1)
-        grid.setRowStretch(0, 2)
+        grid.setRowStretch(0, 1)
         grid.setRowStretch(1, 1)
         grid.setRowStretch(2, 1)
         grid.setColumnStretch(0, 1)
@@ -414,12 +421,13 @@ class MainWindow(QMainWindow):
                 return
             series = {}
             if avg is not None:
-                series[f"{key_prefix}_avg"] = {"xs": self.xs(f"{key_prefix}_avg"), "ys": list(self.buffer(f"{key_prefix}_avg")), "current": avg, "color": COLORS["red"] if key_prefix == "cpu_temp" else COLORS["yellow"], "width": 3.0}
+                color = COLORS["red"] if key_prefix == "cpu_temp" else COLORS["green"] if key_prefix == "cpu_freq" else COLORS["yellow"]
+                series[f"{key_prefix}_avg"] = {"xs": self.xs(f"{key_prefix}_avg"), "ys": list(self.buffer(f"{key_prefix}_avg")), "current": avg, "color": color, "width": 3.0}
             for i, v in enumerate(values):
                 key = f"{key_prefix}_{i}"
                 series[key] = {"xs": self.xs(key), "ys": list(self.buffer(key)), "current": v.value, "color": self.palette_color(i), "width": 1.5, "alpha": 170}
             maxv = max([v.value for v in values if v.value is not None], default=avg)
-            plot.set_series(series, avg, f"평균 굵은선 · {len(values)}개 {label} · max {maxv:.1f}°C")
+            plot.set_series(series, avg, f"평균 굵은선 · {len(values)}개 {label} · max {maxv:.1f}{plot.unit}")
             return
         sensor_val, sensor_key, sensor_sub = self.selected_sensor(combo, values, key_prefix)
         plot.set_data(self.xs(sensor_key), list(self.buffer(sensor_key)), sensor_val, sensor_sub)
@@ -428,9 +436,11 @@ class MainWindow(QMainWindow):
         self.t += 1
         total, cores = sensors.cpu_usage()
         mem_percent, mem_used, mem_total = sensors.memory_usage()
+        cpu_freqs = sensors.cpu_frequency_values()
         cpu_temps = sensors.cpu_temperature_values()
         nvme_temps = sensors.nvme_temperature_values()
 
+        self.sync_sensor_combo(self.cpu_freq_combo, cpu_freqs, "전체 평균", "모든 CPU")
         self.sync_sensor_combo(self.cpu_temp_combo, cpu_temps, "전체 평균", "모든 센서")
         self.sync_sensor_combo(self.nvme_combo, nvme_temps, "전체 평균", "모든 NVMe")
 
@@ -441,6 +451,12 @@ class MainWindow(QMainWindow):
 
         self.append("mem", mem_percent)
         self.mem_plot.set_data(self.xs("mem"), list(self.buffer("mem")), mem_percent, f"{mem_used:.1f}/{mem_total:.1f} GiB")
+
+        cpu_freq_avg = sensors.average(cpu_freqs)
+        self.append("cpu_freq_avg", cpu_freq_avg)
+        for i, v in enumerate(cpu_freqs):
+            self.append(f"cpu_freq_{i}", v.value)
+        self.render_sensors(self.cpu_freq_plot, self.cpu_freq_combo, cpu_freqs, "cpu_freq", "CPU")
 
         cpu_avg = sensors.average(cpu_temps)
         self.append("cpu_temp_avg", cpu_avg)

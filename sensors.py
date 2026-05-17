@@ -44,6 +44,38 @@ def cpu_usage() -> tuple[float, List[float]]:
     return total, cores
 
 
+def cpu_frequency_values() -> List[SensorValue]:
+    """Return current per-CPU clock speeds in GHz.
+
+    Prefer psutil because it already normalizes the platform details.  On some
+    Linux systems psutil can return an empty result, so fall back to cpufreq
+    sysfs values exposed as kHz.
+    """
+    values: List[SensorValue] = []
+
+    try:
+        freqs = psutil.cpu_freq(percpu=True)
+    except Exception:
+        freqs = []
+    for i, freq in enumerate(freqs or []):
+        current = getattr(freq, "current", None)
+        if current is not None:
+            values.append(SensorValue(name=f"CPU {i}", value=float(current) / 1000.0))
+
+    if values:
+        return values
+
+    for cpu in sorted(Path("/sys/devices/system/cpu").glob("cpu[0-9]*"), key=lambda p: int(p.name[3:])):
+        cur = _read_text(cpu / "cpufreq" / "scaling_cur_freq")
+        if cur is None:
+            continue
+        try:
+            values.append(SensorValue(name=cpu.name.upper(), value=float(cur) / 1_000_000.0))
+        except ValueError:
+            continue
+    return values
+
+
 def memory_usage() -> tuple[float, float, float]:
     mem = psutil.virtual_memory()
     return float(mem.percent), mem.used / 1024**3, mem.total / 1024**3
